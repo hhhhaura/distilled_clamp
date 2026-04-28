@@ -1,0 +1,112 @@
+# =============================================================================
+# Perceiver-resampling training config (copied from base.yaml with input module
+# switched to Perceiver and a separate output directory).
+#
+# Paths use ${VAR} templates — expanded by distilled_clamp.utils.load_yaml via
+# os.path.expandvars. Example (bash):
+#
+#   export CTRLM_REPO=/abs/path/to/CTRL-M
+#   export LAKH_MIDI_ROOT=/path/to/midi_corpus
+# =============================================================================
+seed: 42
+device: cuda
+
+paths:
+  lakh_midi_root: ${LAKH_MIDI_ROOT}
+  anticipation_root: ${CTRLM_REPO}/anticipation
+  clamp3_root: ${CTRLM_REPO}/clamp3
+  output_root: ${CTRLM_REPO}/ctrlm-ismir/distilled_clamp/outputs_perceiver_full
+  # Legacy folder name; preprocessing uses random token windows (not fixed wall-clock segments).
+  preprocessed_train_root: ${CTRLM_REPO}/ctrlm-ismir/distilled_clamp/preprocessed/train
+  preprocessed_val_root: ${CTRLM_REPO}/ctrlm-ismir/distilled_clamp/preprocessed/val
+
+data:
+  midi_glob: "**/*.mid"
+  midi_glob_alt: "**/*.midi"
+  max_files: 1000000
+  # Optional cap for number of preprocessed train files consumed during training (0 = all).
+  max_training_samples: 0
+  val_file_count: 50
+  # Random segments per MIDI (train and val); each is triplet-aligned, length in source.preproc_chunk_*.
+  segments_per_file: 10
+  # Re-glob preprocessed train/val dirs each epoch (pick up new .pt shards).
+  rescan_each_epoch: true
+  rescan_train_each_epoch: true
+  rescan_val_each_epoch: true
+  num_workers: 2
+  batch_size: 16
+  pin_memory: true
+  drop_last: false
+
+source:
+  # AR-event vocab only (tokens valid after AUTOREGRESS): [0, CONTROL_OFFSET).
+  vocab_size: 27513
+  # Dedicated pad token id sits at vocab_size (requires model vocab = vocab_size + 1).
+  pad_token_id: 27513
+  # Random crop length bounds (tokens); must be full anticipation triplets (multiples of 3).
+  preproc_chunk_min: 510
+  preproc_chunk_max: 1023
+
+teacher:
+  clamp_weights_path: ${CTRLM_REPO}/clamp-anti-bridge/weights/weights_clamp3_c2_h_size_768_t_model_FacebookAI_xlm-roberta-base_t_length_128_a_size_768_a_layers_12_a_length_128_s_size_768_s_layers_12_p_size_64_p_length_512.pth
+
+target:
+  dim: 768
+
+patching:
+  patch_len: 63
+  max_patches: 0
+
+input_module:
+  # One of: patch, perceiver
+  type: perceiver
+  perceiver_num_latents: 64
+
+rope:
+  theta: 10000.0
+  max_positions: 4096
+
+model:
+  d_model: 768
+  nhead: 8
+  num_layers: 4
+  dim_feedforward: 2048
+  dropout: 0.1
+  # One of: distilled_head, direct
+  m3_alignment: distilled_head
+  freeze:
+    # false => full M3 fine-tuning (no M3 freezing and no LoRA adapters)
+    enable: false
+    # One of: false | core_only | qkv
+    # false => freeze M3 without LoRA
+    # core_only => freeze M3 and train LoRA on out_proj only
+    # qkv => freeze M3 and train LoRA on q/k/v/out_proj
+    lora: qkv
+    rank: 16
+    alpha: 32.0
+    dropout: 0.1
+
+loss:
+  lambda_recon: 1.0
+  lambda_soft: 1.0
+  lambda_rkd: 1.0
+  temperature: 0.07
+  lambda_smooth: 0.0
+  smooth_noise_std: 0.0
+  smooth_loss_type: kl
+  alignment_threshold: 0.8
+
+optim:
+  lr: 1.0e-4
+  weight_decay: 1.0e-2
+  grad_clip: 1.0
+  max_steps: 100000000
+  use_amp: true
+  accumulation_steps: 4
+  warmup_steps: 3000
+  lr_min: 0.0
+  cosine: true
+
+log:
+  log_every_steps: 50
+  save_every_steps: 1000

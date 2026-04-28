@@ -1,0 +1,105 @@
+# =============================================================================
+# Distilled_clamp training config (alignment-focused medium setup).
+# Encoder/decoder depth can be set independently via model.encoder_num_layers/model.decoder_num_layers.
+# =============================================================================
+seed: 42
+device: cuda
+
+paths:
+  lakh_midi_root: ${LAKH_MIDI_ROOT}
+  anticipation_root: ${CTRLM_REPO}/anticipation
+  clamp3_root: ${CTRLM_REPO}/clamp3
+  output_root: ${CTRLM_REPO}/ctrlm-ismir/distilled_clamp/outputs_mlp_head
+  preprocessed_train_root: ${CTRLM_REPO}/ctrlm-ismir/distilled_clamp/preprocessed_final/train
+  preprocessed_val_root: ${CTRLM_REPO}/ctrlm-ismir/distilled_clamp/preprocessed_final/val
+
+data:
+  midi_glob: "**/*.mid"
+  midi_glob_alt: "**/*.midi"
+  max_files: 1000000
+  max_training_samples: 0
+  val_file_count: 1000
+  segments_per_file: 10
+  rescan_each_epoch: true
+  rescan_train_each_epoch: true
+  rescan_val_each_epoch: true
+  num_workers: 2
+  batch_size: 16
+  pin_memory: true
+  drop_last: false
+
+source:
+  vocab_size: 27513
+  pad_token_id: 27513
+  preproc_chunk_min: 800
+  preproc_chunk_max: 1023
+
+teacher:
+  clamp_weights_path: ${CTRLM_REPO}/clamp-anti-bridge/weights/weights_clamp3_c2_h_size_768_t_model_FacebookAI_xlm-roberta-base_t_length_128_a_size_768_a_layers_12_a_length_128_s_size_768_s_layers_12_p_size_64_p_length_512.pth
+
+target:
+  dim: 768
+
+patching:
+  patch_len: 129
+  max_patches: 0
+
+input_module:
+  # One of: patch, perceiver
+  type: perceiver
+  perceiver_num_latents: 4
+
+rope:
+  theta: 10000.0
+  max_positions: 2048
+
+model:
+  d_model: 768
+  nhead: 8
+  num_layers: 4
+  encoder_num_layers: 6
+  decoder_num_layers: 6
+  dim_feedforward: 1536
+  dropout: 0.1
+  # One of: direct, distilled_head, mlp
+  align: mlp
+  align_mlp_hidden_dim: 1536
+  align_mlp_dropout: 0.1
+  freeze:
+    # false => full M3 fine-tuning (no M3 freezing and no LoRA adapters)
+    enable: false
+    # One of: false | core_only | qkv
+    lora: qkv
+    rank: 8
+    alpha: 16.0
+    dropout: 0.1
+
+loss:
+  lambda_recon: 0.8
+  lambda_recon_schedule:
+    type: linear
+    final: 0.3
+    steps: 20000
+  lambda_soft: 1.5
+  lambda_rkd: 1.0
+  temperature: 0.07
+  teacher_temperature: 0.05
+  lambda_smooth: 0.00
+  smooth_noise_std: 0.00
+  smooth_loss_type: kl
+  alignment_threshold: 0.8
+
+optim:
+  lr: 1.0e-4
+  weight_decay: 1.0e-2
+  grad_clip: 1.0
+  max_steps: 100000000
+  use_amp: true
+  accumulation_steps: 4
+  warmup_steps: 3000
+  lr_min: 0.0
+  cosine: true
+
+log:
+  log_every_steps: 20
+  save_every_steps: 200
